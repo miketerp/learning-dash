@@ -2,6 +2,7 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import json
+import os
 import pandas as pd
 import numpy as np
 import requests
@@ -12,50 +13,58 @@ from plotly import graph_objs as go
 from plotly.graph_objs import *
 from datetime import datetime as dt
 
-# can use os.environ['MBATOKEN'] = '...' to hide passwords
-mapbox_access_token = "pk.eyJ1IjoicGxvdGx5bWFwYm94IiwiYSI6ImNqdnBvNDMyaTAxYzkzeW5ubWdpZ2VjbmMifQ.TXcBE-xg9BFdV2ocecc_7g"
-# filename = "./datasets/test.json"
-filename = "./datasets/ont-food.json"
+mapbox_access_token = os.environ['MB_AUTH_TOKEN']
+filename = "./datasets/600.json"
 
 app = dash.Dash(__name__, external_stylesheets=[
     'https://codepen.io/chriddyp/pen/bWLwgP.css',
-    # why cant i load local?
     './assets/custom-css.css'
 ])
 
-latArray, longArray, nameArray, stars, city = [[], [], [], [], []]
-# citySet = set()
+df = None
+counter = 0
 
 with open(filename) as f:
     content = f.readlines()
 
 for line in content:
     j = json.loads(line)
-    # why \n newline doesnt help with formatiing?
-    newStr = j["name"] + ", \n" + j["address"] + ", \n" + str(j["stars"]) + " stars"
-    latArray.append(j["latitude"])
-    longArray.append(j["longitude"])
-    stars.append(j["stars"])
-    city.append(j["city"])
-    nameArray.append(newStr)
 
-fig = go.Figure(go.Scattermapbox(
-    lat=latArray,
-    lon=longArray,
-    mode='markers',
-    marker=go.scattermapbox.Marker(
-        size=6
-    ),
-    text=nameArray
-))
+    # why \n newline doesnt help with formatting?
+    # newStr = j["name"] + ", \n" + j["address"] + ", \n" + str(j["stars"]) + " stars"
+    if df is None:
+        df = pd.DataFrame(data=j, index=[counter])
+        df["markerText"] = df["name"] + ", " + df["address"]
+    else:
+        df2 = pd.DataFrame(data=j, index=[counter])
+        df2["markerText"] = df2["name"] + ", " + df2["address"]
+        df = pd.concat([df, df2], sort=False)
 
+    counter = counter + 1
+
+
+def renderMapFigure(smolDF):
+    # This seems unnecessary (renders twice)
+    smolDF = smolDF[(smolDF['stars'] >= float(3.5)) & (df['city'] == "Toronto") & (df['state'] == "ON")]
+
+    return go.Figure(go.Scattermapbox(
+        lat=smolDF["latitude"].tolist(),
+        lon=smolDF["longitude"].tolist(),
+        mode='markers',
+        marker=go.scattermapbox.Marker(
+            size=6
+        ),
+        text=smolDF["markerText"].tolist()
+    ))
+
+fig = renderMapFigure(df)
 fig.update_layout(
     hovermode='closest',
     mapbox=go.layout.Mapbox(
         accesstoken=mapbox_access_token,
         bearing=0,
         center=go.layout.mapbox.Center(
-            lat=43.74,
+            lat=43.69,
             lon=-79.41
         ),
         pitch=0,
@@ -69,6 +78,7 @@ app.layout = html.Div([
     html.Div([
         html.Form(
             html.Div([
+                html.Br(), html.Br(), html.Br(), html.Br(),
                 html.Img(src=app.get_asset_url("dash-logo-new.png"), style={'height': '2em'}),
                 html.H3("DASHly - YELP LOCATION APP"),
                 html.P("Search for all the restaurants located nearby you."),
@@ -78,46 +88,15 @@ app.layout = html.Div([
                     }),
                     html.Div([
                         html.Div([
-                            html.P("Find: ",
-                            style={
-                                'margin': '0.15em'
-                            }),
-                            html.P("Near: ",
-                            style={
-                                'margin': '0.15em',
-                                'marginTop': '0.55em'
-                            }),
-                            html.P("Ratings: ",
-                            style={
-                                'margin': '0.15em',
-                                'marginTop': '0.55em'
-                            }),
-                        ], style={
-                            'fontSize': '1.5em',
-                            'padding': '0.5em',
-                            'width': '25%',
-                            'order': 1
-                        }),
+                            html.P("Find: ", style={'margin': '0.15em'}),
+                            html.P("Near: ", style={'margin': '0.15em', 'marginTop': '0.55em'}),
+                            html.P("Ratings: ", style={'margin': '0.15em', 'marginTop': '0.55em'}),
+                            # html.P("Cuisine: ", style={'margin': '0.15em', 'marginTop': '0.55em'}),
+                        ], style={'fontSize': '1.5em', 'padding': '0.5em', 'width': '25%', 'order': 1}),
                         html.Div([
-                            dcc.Input(
-                                id='my-id',
-                                type='text',
-                                value='thai',
-                                placeholder="burgers, sushi ...",
-                                style={
-                                    'margin': '0.5em'
-                                }),
-                            dcc.Input(
-                                id='my-addr',
-                                value='Toronto, ON',
-                                type='text',
-                                placeholder="city, prov. ...",
-                                style={
-                                    'margin': '0.5em'
-                                }
-                            ),
-                            dcc.Dropdown(
-                                id="ratings",
+                            dcc.Input(id='my-id', type='text', placeholder="burgers, sushi ...", style={'margin': '0.5em', 'width': '100%'}),
+                            dcc.Input(id='my-addr', type='text', value='Toronto, ON', placeholder="city, prov. ...", style={'margin': '0.5em', 'width': '100%'}),
+                            dcc.Dropdown(id="ratings", value="3.5", clearable=False,
                                 options=[{
                                     'label': '1.5', 'value': 1.5
                                 }, {
@@ -127,14 +106,29 @@ app.layout = html.Div([
                                 }, {
                                     'label': '4.5', 'value': 4.5
                                 }],
-                                value="3.5",
-                                clearable=False,
                                 style={
                                     # double css applied, why?
                                     # 'width': '50%',
-                                    'margin': '0.5em'
+                                    'margin': '0.5em',
+                                    'marginTop': '0.4em'
                                 }
-                            )
+                            ),
+                            # dcc.Dropdown(id="cuisine", value="Italian", clearable=False,
+                            #     options=[{
+                            #         'label': 'American', 'value': 'American'
+                            #     }, {
+                            #         'label': 'French', 'value': 'French'
+                            #     }, {
+                            #         'label': 'Italian', 'value': 'Italian'
+                            #     }],
+                            #     style={
+                            #         # double css applied, why?
+                            #         # 'width': '50%',
+                            #         'margin': '0.5em',
+                            #         'marginTop': '0.7em'
+                            #     }
+                            # ),
+                            # html.Button('Submit', id='button')
                         ], style={
                             'padding': '0.5em',
                             'width': '50%',
@@ -148,7 +142,7 @@ app.layout = html.Div([
                 ], style={
                     'borderWidth': '1px',
                     'padding': '1em',
-                    'height': '250px'
+                    'height': '225px'
                 })
             ], style={
                 'padding': '2em',
@@ -166,8 +160,8 @@ app.layout = html.Div([
             id='my-graph2',
             figure=fig,
             style={
-                'height': '875px',
-                'width': '75%'
+                'height': '900px',
+                'width': '100%'
             }
         )
     ], style={
@@ -181,67 +175,31 @@ app.layout = html.Div([
     'flexWrap': 'wrap'
 })
 
-
-def getFromElasticSearch(term, location, rating):
-    if (term == None):
-        term=""
-
-    url = 'http://localhost:1337/elastic?query=' + term + '&location=' + location + '&stars=' + str(rating)
-    resp = requests.get(url)
-    if (resp.status_code != 200):
-        raise Exception('GET /tasks/ {}'.format(resp.status_code))
-        return []
-    else:
-        return resp.json()
-
 def formatSearchResults(res):
-    # filter markers based on yelp ratings
-    filteredLatArray = []
-    filteredLongArray = []
-    filteredNameArray = []
-    filteredStars = []
-
-    for ind, val in enumerate(res):
-        # print(ind)
-        obj = val["_source"]
-        filteredLatArray.append(obj["latitude"])
-        filteredLongArray.append(obj["longitude"])
-        filteredNameArray.append(obj["name"])
-        filteredStars.append(obj["stars"])
-
-    return filteredLatArray, filteredLongArray, filteredNameArray, filteredStars
-
-
-def filter_arrays(selectedRatings):
-    # filter markers based on yelp ratings
-    filteredLatArray = []
-    filteredLongArray = []
-    filteredNameArray = []
-    filteredStars = []
-
-    for ind, val in enumerate(stars):
-        if (stars[ind] >= float(selectedRatings)):
-            filteredLatArray.append(latArray[ind])
-            filteredLongArray.append(longArray[ind])
-            filteredNameArray.append(nameArray[ind])
-            filteredStars.append(stars[ind])
-
-    return filteredLatArray, filteredLongArray, filteredNameArray, filteredStars
+    markerText = res["markerText"].tolist()
+    return res["latitude"].tolist(), res["longitude"].tolist(), markerText, res["stars"].tolist()
 
 @app.callback(
     Output(component_id='my-graph2', component_property='figure'),
     [Input(component_id='ratings', component_property='value'),
      Input(component_id='my-id', component_property='value'),
      Input(component_id='my-addr', component_property='value')]
+     # Input(component_id='cuisine', component_property='value')]
 )
-def update_maps(yelpratings, term, location):
-    # a1, a2, a3, a4 = filter_arrays(yelpratings)
+def update_maps(yelpratings, searchTerm, location):
+    print("Updating ...")
+    # print(searchTerm)
+    # print(cuisine)
+    # print(yelpratings)
 
-    searchResults = getFromElasticSearch(term, location, yelpratings)
-    a1, a2, a3, a4 = formatSearchResults(searchResults)
-    print(a1)
-    print(a2)
-    print(a3)
+    city, state = location.split(", ")
+    print("filtering...")
+    tmp = df[(df['stars'] >= float(yelpratings)) & (df['city'] == city) & (df['state'] == state)]
+    # print(tmp)
+    # filtered = tmp[cuisine in tmp['categories']]
+    # print(filtered)
+
+    a1, a2, a3, a4 = formatSearchResults(tmp)
 
     # there's gotta be a different way to updating markers, not sure atm
     newFig = go.Figure(go.Scattermapbox(
@@ -260,7 +218,7 @@ def update_maps(yelpratings, term, location):
             accesstoken=mapbox_access_token,
             bearing=0,
             center=go.layout.mapbox.Center(
-                lat=43.74,
+                lat=43.69,
                 lon=-79.41
             ),
             pitch=0,
@@ -270,32 +228,9 @@ def update_maps(yelpratings, term, location):
         plot_bgcolor='rgba(0,0,0,0)'
     )
 
+    print("rendering...")
     return newFig
 
 # hot loading
 if __name__ == '__main__':
     app.run_server(debug=True)
-
-# historic stock ticker
-# @app.callback(Output('my-graph', 'figure'), [Input('my-id', 'value')])
-# def update_graph(selected_dropdown_value):
-#     try:
-#         df = web.DataReader(selected_dropdown_value, 'av-daily', start=dt(2015, 5, 1), end=dt.now(), api_key='9L7IQ8UFUWOSX726')
-#     except:
-#         print("Try again")
-#
-#     return {
-#         'data': [{'x': df.index,'y': df.close}],
-#         'layout': {
-#             'margin': {'l': 40, 'r': 0, 't': 20, 'b': 30}
-#         }
-#     }
-
-# Test decorator with multiple inputs bound
-# @app.callback(
-#     Output(component_id='my-div', component_property='children'),
-#     [Input(component_id='my-id', component_property='value'),
-#      Input(component_id='my-addr', component_property='value')]
-# )
-# def update_output_div(input_val1, input_val2):
-#     return 'You\'ve entered "{input_val1}, {input_val2}"'.format(input_val1=input_val1, input_val2=input_val2)
